@@ -1,0 +1,76 @@
+# from fastapi import FastAPI
+# from fastapi.middleware.cors import CORSMiddleware
+# from app.api.v1.endpoints import sample
+# from app.core.config import settings
+# from app.api.v1.api import api_router
+
+# # app = FastAPI(title=settings.PROJECT_NAME, version="1.0.0")
+# app = FastAPI()
+# app.include_router(api_router)
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"], allow_credentials=True,
+#     allow_methods=["*"], allow_headers=["*"],
+# )
+
+# # app.include_router(sample.router, prefix="/api/v1", tags=["Sample"])
+# # app.include_router(api_router)
+
+
+#version 2
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
+from app.core.config import settings
+from app.presentation.api.v1.api import api_router
+from app.core.deps import oauth2_scheme
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    description="API cho hệ thống quản lý bán hàng thú cưng"
+)
+
+# Middleware CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Router
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# OpenAPI configuration
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "OAuth2PasswordBearer": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+    }
+    for path in openapi_schema["paths"].values():
+        for method in path.values():
+            method.setdefault("security", [{"OAuth2PasswordBearer": []}])
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run("app.main:app", host="127.0.0.1", port=8001, reload=False)
+#
