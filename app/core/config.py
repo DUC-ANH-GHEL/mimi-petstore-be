@@ -24,7 +24,8 @@ class Settings(BaseSettings):
         "https://3giaydau.io.vn",
         "http://localhost",
         "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "https://mimi.thuyluc.shop/"
     ]
     
     # Cloudinary
