@@ -1,72 +1,91 @@
 from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.application.dto.category import CategoryCreate, CategoryUpdate, CategoryResponse
-from app.application.services.category_service import CategoryService
+from app.domain.models.category import Category
+from app.infrastructure.repositories.category_repository import CategoryRepository
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 
 @router.post("/", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
-def create_category(
+async def create_category(
     category: CategoryCreate,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Create a new category."""
-    category_service = CategoryService(db)
-    return category_service.create(category)
+    repository = CategoryRepository(db)
+    existing = await repository.get_by_name(category.name)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category name already exists",
+        )
+
+    entity = Category(**category.model_dump())
+    return await repository.create(entity)
 
 @router.get("/", response_model=List[CategoryResponse])
-def get_categories(
+async def get_categories(
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Get all categories."""
-    category_service = CategoryService(db)
-    return category_service.get_all(skip=skip, limit=limit)
+    result = await db.execute(select(Category).offset(skip).limit(limit))
+    return list(result.scalars().all())
 
 @router.get("/{category_id}", response_model=CategoryResponse)
-def get_category(
+async def get_category(
     category_id: int,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Get a category by ID."""
-    category_service = CategoryService(db)
-    category = category_service.get_by_id(category_id)
+    category = await db.get(Category, category_id)
     if not category:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
+            detail="Category not found",
         )
     return category
 
 @router.put("/{category_id}", response_model=CategoryResponse)
-def update_category(
+async def update_category(
     category_id: int,
     category: CategoryUpdate,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Update a category."""
-    category_service = CategoryService(db)
-    updated_category = category_service.update(category_id, category)
-    if not updated_category:
+    entity = await db.get(Category, category_id)
+    if not entity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
+            detail="Category not found",
         )
-    return updated_category
+
+    update_data = category.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(entity, field, value)
+
+    await db.commit()
+    await db.refresh(entity)
+    return entity
 
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_category(
+async def delete_category(
     category_id: int,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Delete a category."""
-    category_service = CategoryService(db)
-    if not category_service.delete(category_id):
+    entity = await db.get(Category, category_id)
+    if not entity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
-        ) 
+            detail="Category not found",
+        )
+
+    await db.delete(entity)
+    await db.commit()

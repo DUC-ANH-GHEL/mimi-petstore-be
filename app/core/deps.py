@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.domain.models.user import User
 from app.infrastructure.repositories.user_repository import UserRepository
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
