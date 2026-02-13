@@ -2,7 +2,8 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.domain.models.order import Order, OrderItem
+from app.domain.models.order import Order
+from app.domain.models.order_item import OrderItem
 from app.application.dto.order import OrderCreate, OrderUpdate
 
 class OrderRepository:

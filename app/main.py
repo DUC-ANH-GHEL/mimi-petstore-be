@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from app.core.config import settings
 from app.presentation.api.v1.api import api_router
+from app.presentation.api.admin.api import admin_api_router
 from app.core.deps import oauth2_scheme
 
 app = FastAPI(
@@ -44,6 +45,7 @@ app.add_middleware(
 
 # Router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(admin_api_router, prefix="/api/admin")
 
 # OpenAPI configuration
 def custom_openapi():

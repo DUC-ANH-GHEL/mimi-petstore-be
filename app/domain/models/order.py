@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 from app.core.database import Base
+from app.domain.models.order_item import OrderItem
 
 # class Order(Base):
 #     id = Column(Integer, primary_key=True, index=True)
@@ -23,21 +24,6 @@ class PaymentStatus(str, enum.Enum):
     PAID = "paid"
     FAILED = "failed"
     REFUNDED = "refunded"
-
-class OrderItem(Base):
-    __tablename__ = "order_items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey('orders.id'))
-    product_id = Column(Integer, ForeignKey('products.id'))
-    quantity = Column(Integer, nullable=False)
-    price = Column(Float, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    order = relationship("Order", back_populates="items")
-    product = relationship("Product", back_populates="order_items")
 
 class Order(Base):
     __tablename__ = "orders"

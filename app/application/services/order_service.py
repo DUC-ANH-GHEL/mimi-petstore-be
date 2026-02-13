@@ -1,5 +1,6 @@
 from typing import Optional, List
-from app.domain.models.order import Order, OrderItem, OrderStatus, PaymentStatus
+from app.domain.models.order import Order, OrderStatus, PaymentStatus
+from app.domain.models.order_item import OrderItem
 from app.infrastructure.repositories.order_repository import OrderRepository
 from app.application.services.base import BaseServiceImpl
 from app.application.dto.order import OrderCreate, OrderUpdate, OrderResponse
