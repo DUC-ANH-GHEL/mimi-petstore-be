@@ -34,20 +34,23 @@ class Settings(BaseSettings):
     ]
     
     # Cloudinary
+    CLOUDINARY_URL: Optional[str] = None
     CLOUDINARY_CLOUD_NAME: Optional[str] = None
     CLOUDINARY_API_KEY: Optional[str] = None
     CLOUDINARY_API_SECRET: Optional[str] = None
 
 settings = Settings()
 
-# Configure Cloudinary if credentials are provided
-if all([
+# Configure Cloudinary
+if settings.CLOUDINARY_URL:
+    cloudinary.config(cloudinary_url=settings.CLOUDINARY_URL)
+elif all([
     settings.CLOUDINARY_CLOUD_NAME,
     settings.CLOUDINARY_API_KEY,
-    settings.CLOUDINARY_API_SECRET
+    settings.CLOUDINARY_API_SECRET,
 ]):
     cloudinary.config(
         cloud_name=settings.CLOUDINARY_CLOUD_NAME,
         api_key=settings.CLOUDINARY_API_KEY,
-        api_secret=settings.CLOUDINARY_API_SECRET
+        api_secret=settings.CLOUDINARY_API_SECRET,
     )

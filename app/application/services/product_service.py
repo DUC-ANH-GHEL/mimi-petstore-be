@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+import cloudinary
 import cloudinary.uploader
 from fastapi import UploadFile
 
@@ -85,6 +86,11 @@ class ProductService(BaseServiceImpl[Product, ProductCreate, ProductUpdate]):
 
         # Upload images if any
         if images:
+            cfg = cloudinary.config()
+            if not getattr(cfg, "api_key", None) or not getattr(cfg, "cloud_name", None):
+                raise ValidationException(
+                    "Cloudinary is not configured. Set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME/CLOUDINARY_API_KEY/CLOUDINARY_API_SECRET."
+                )
             for idx, image_file in enumerate(images):
                 try:
                     # Upload to Cloudinary
