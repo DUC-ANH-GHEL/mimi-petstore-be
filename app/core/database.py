@@ -12,6 +12,14 @@ def _normalize_asyncpg_url(db_url: str) -> str:
     asyncpg doesn't accept libpq-style query params like `sslmode`.
     Neon URLs often include `sslmode=require` and/or `channel_binding=require`.
     """
+    # Neon / many providers hand out libpq-style URLs like:
+    #   postgresql://.../?sslmode=require&channel_binding=require
+    # For the async engine we need an async dialect.
+    if db_url.startswith("postgresql://"):
+        db_url = "postgresql+asyncpg://" + db_url[len("postgresql://") :]
+    elif db_url.startswith("postgres://"):
+        db_url = "postgresql+asyncpg://" + db_url[len("postgres://") :]
+
     if "+asyncpg" not in db_url:
         return db_url
 
