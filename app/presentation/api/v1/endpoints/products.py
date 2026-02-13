@@ -6,6 +6,7 @@ import json
 from app.core.deps import get_current_user, get_db
 from app.domain.models.user import User
 from app.application.dto.product import ProductCreate, ProductUpdate, ProductResponse, ProductImageCreate, ProductImageUpdate, ProductImageResponse
+from app.application.dto.product import ProductVariantCreate
 from app.application.services.product_service import ProductService
 from app.infrastructure.repositories.product_repository import ProductRepository
 from app.core.exceptions import NotFoundException, ValidationException
@@ -23,15 +24,25 @@ async def create_product(
     slug: str = Form(...),
     description: Optional[str] = Form(None),
     price: float = Form(...),
+    sale_price: Optional[float] = Form(None),
+    currency: str = Form("VND"),
     sku: str = Form(...),
     affiliate: int = Form(0),
+    stock: int = Form(0),
+    brand: Optional[str] = Form(None),
+    material: Optional[str] = Form(None),
+    size: Optional[str] = Form(None),
+    color: Optional[str] = Form(None),
+    pet_type: Optional[str] = Form(None),
+    season: Optional[str] = Form(None),
     weight: float = Form(...),
     length: float = Form(...),
     width: float = Form(...),
     height: float = Form(...),
     is_active: bool = Form(True),
     category_id: int = Form(...),
-    images: List[UploadFile] = File(None),
+    variants: Optional[str] = Form(None, description="JSON array of variants"),
+    images: Optional[List[UploadFile]] = File(None),
     product_service: ProductService = Depends(get_product_service),
     current_user: User = Depends(get_current_user)
 ):
@@ -43,19 +54,44 @@ async def create_product(
             slug=slug,
             description=description,
             price=price,
+            sale_price=sale_price,
+            currency=currency,
             sku=sku,
             affiliate=affiliate,
+            stock=stock,
+            brand=brand,
+            material=material,
+            size=size,
+            color=color,
+            pet_type=pet_type,
+            season=season,
             weight=weight,
             length=length,
             width=width,
             height=height,
             is_active=is_active,
             category_id=category_id,
-            images=images or []
         )
         
+        parsed_variants: list[ProductVariantCreate] = []
+        if variants:
+            try:
+                raw = json.loads(variants)
+                if not isinstance(raw, list):
+                    raise ValueError("variants must be a JSON array")
+                parsed_variants = [ProductVariantCreate(**item) for item in raw]
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid variants JSON: {str(e)}",
+                )
+
         # Create product
-        product = await product_service.create(product_in)
+        product = await product_service.create(
+            product_in,
+            images=images or [],
+            variants=parsed_variants,
+        )
         return product
     except ValidationException as e:
         raise HTTPException(

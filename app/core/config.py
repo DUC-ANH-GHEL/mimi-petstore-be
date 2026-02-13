@@ -1,10 +1,15 @@
-from typing import Any, Dict, List, Optional, Union
-from pydantic import AnyHttpUrl, PostgresDsn, field_validator
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import cloudinary
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        env_file=".env",
+    )
+
     PROJECT_NAME: str = "MiMi PetStore API"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
@@ -32,10 +37,6 @@ class Settings(BaseSettings):
     CLOUDINARY_CLOUD_NAME: Optional[str] = None
     CLOUDINARY_API_KEY: Optional[str] = None
     CLOUDINARY_API_SECRET: Optional[str] = None
-    
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
 
 settings = Settings()
 

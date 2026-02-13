@@ -1,5 +1,8 @@
 from typing import List
 
+import re
+import unicodedata
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +13,15 @@ from app.domain.models.category import Category
 from app.infrastructure.repositories.category_repository import CategoryRepository
 
 router = APIRouter(prefix="/categories", tags=["categories"])
+
+
+def _slugify(value: str) -> str:
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.lower().strip()
+    value = re.sub(r"[^a-z0-9\s-]", "", value)
+    value = re.sub(r"[\s-]+", "-", value)
+    return value.strip("-") or "category"
 
 @router.post("/", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
 async def create_category(
@@ -25,7 +37,17 @@ async def create_category(
             detail="Category name already exists",
         )
 
-    entity = Category(**category.model_dump())
+    base_slug = _slugify(category.name)
+    slug = base_slug
+    suffix = 2
+    while True:
+        existing_slug = await db.execute(select(Category).where(Category.slug == slug))
+        if existing_slug.scalar_one_or_none() is None:
+            break
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+
+    entity = Category(**category.model_dump(), slug=slug)
     return await repository.create(entity)
 
 @router.get("/", response_model=List[CategoryResponse])

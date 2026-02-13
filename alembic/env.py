@@ -1,5 +1,7 @@
 from logging.config import fileConfig
 
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from sqlalchemy import create_engine
@@ -33,6 +35,27 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = Base.metadata
 
+
+def _normalize_sync_pg_url(db_url: str) -> str:
+    """Normalize DB URL for sync drivers (psycopg2).
+
+    App runtime uses asyncpg where we may normalize to `ssl=require`.
+    psycopg2/libpq expects `sslmode=require` instead.
+    """
+    if "+asyncpg" in db_url:
+        db_url = db_url.replace("+asyncpg", "")
+
+    parts = urlsplit(db_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+
+    if "sslmode" not in query and query.get("ssl") == "require":
+        query.pop("ssl", None)
+        query["sslmode"] = "require"
+
+    query.pop("channel_binding", None)
+    new_query = urlencode(query)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -45,7 +68,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = settings.DATABASE_URL.replace('+asyncpg', '').replace('?sslmode=require', '')
+    url = _normalize_sync_pg_url(settings.DATABASE_URL)
     print("📡 [OFFLINE] Running migration on DB URL:", url)
 
     context.configure(
@@ -66,7 +89,7 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = create_engine(settings.DATABASE_URL.replace('+asyncpg', ''))
+    connectable = create_engine(_normalize_sync_pg_url(settings.DATABASE_URL))
 
     with connectable.connect() as connection:
         context.configure(

@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.domain.models.user import User
 from app.infrastructure.repositories.user_repository import UserRepository
+from app.core.exceptions import NotFoundException
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 
@@ -30,8 +31,9 @@ async def get_current_user(
         raise credentials_exception
 
     user_repository = UserRepository(db)
-    user = await user_repository.get_by_id(int(user_id))
-    if user is None:
+    try:
+        user = await user_repository.get_by_id(int(user_id))
+    except NotFoundException:
         raise credentials_exception
     return user
 
