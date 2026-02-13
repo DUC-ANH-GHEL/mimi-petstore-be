@@ -23,10 +23,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.presentation.api.v1.api import api_router
 from app.presentation.api.admin.api import admin_api_router
 from app.core.deps import oauth2_scheme
+from app.core.admin_api_error import AdminAPIError
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -71,6 +73,14 @@ def custom_openapi():
     return app.openapi_schema
 
 app.openapi = custom_openapi
+
+
+@app.exception_handler(AdminAPIError)
+async def admin_api_error_handler(request, exc: AdminAPIError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"success": False, "error_code": exc.error_code, "message": exc.message},
+    )
 
 # if __name__ == "__main__":
 #     import uvicorn

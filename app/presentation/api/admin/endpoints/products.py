@@ -26,6 +26,7 @@ from app.domain.models.product import (
 )
 from app.domain.models.user import User
 from app.domain.models.order_item import OrderItem
+from app.core.admin_api_error import AdminAPIError
 
 
 router = APIRouter()
@@ -37,10 +38,7 @@ def _admin_error(
     message: str,
     status_code: int = status.HTTP_400_BAD_REQUEST,
 ) -> None:
-    raise HTTPException(
-        status_code=status_code,
-        detail={"success": False, "error_code": error_code, "message": message},
-    )
+    raise AdminAPIError(error_code=error_code, message=message, status_code=status_code)
 
 
 async def _slug_exists(db: AsyncSession, slug: str, *, exclude_product_id: Optional[int] = None) -> bool:
@@ -102,7 +100,7 @@ async def _get_product_or_404(db: AsyncSession, product_id: int) -> Product:
     )
     product = (await db.execute(stmt)).scalars().first()
     if not product or product.deleted_at is not None:
-        raise HTTPException(status_code=404, detail={"success": False, "error_code": "NOT_FOUND", "message": "Product not found"})
+        raise AdminAPIError(error_code="NOT_FOUND", message="Product not found", status_code=404)
     return product
 
 
@@ -306,6 +304,8 @@ async def admin_create_product(
         }
     except HTTPException:
         raise
+    except AdminAPIError:
+        raise
     except Exception as e:
         _admin_error(error_code="INTERNAL_ERROR", message=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -497,6 +497,8 @@ async def admin_update_product(
 
         return {"success": True, "message": "Product updated successfully"}
     except HTTPException:
+        raise
+    except AdminAPIError:
         raise
     except Exception as e:
         _admin_error(error_code="INTERNAL_ERROR", message=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
