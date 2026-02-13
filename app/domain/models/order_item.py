@@ -7,8 +7,8 @@ class OrderItem(Base):
     __tablename__ = "order_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer)
-    product_id = Column(Integer)
+    order_id = Column(Integer, ForeignKey("orders.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
     product_variant_id = Column(Integer, ForeignKey("product_variants.id"), nullable=True)
     quantity = Column(Integer, nullable=False)
     price = Column(Float, nullable=False)
