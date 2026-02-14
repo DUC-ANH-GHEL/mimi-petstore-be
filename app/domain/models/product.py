@@ -39,7 +39,9 @@ class Product(Base):
     deleted_at = Column(DateTime, nullable=True)
 
     price = Column(Float, nullable=False)
+    original_price = Column(Float, nullable=True)
     sale_price = Column(Float, nullable=True)
+    thumbnail = Column(String, nullable=True)
     currency = Column(String, nullable=False, default="VND")
     sku = Column(String, unique=True, index=True)
     is_active = Column(Boolean, default=True)
