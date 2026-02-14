@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.presentation.api.v1.api import api_router
 from app.presentation.api.admin.api import admin_api_router
-from app.presentation.api.public.api import public_api_router
+from app.presentation.api.public_api.api import public_api_router
 from app.core.deps import oauth2_scheme
 from app.core.admin_api_error import AdminAPIError
 
