@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-ProductStatus = Literal["active", "inactive", "draft"]
+ProductStatus = Literal["active", "inactive", "draft", "discontinued"]
 MediaType = Literal["image", "video"]
 
 
@@ -102,3 +102,29 @@ class BulkUpdateVariantsBody(BaseModel):
 
 class GenerateVariantsBody(BaseModel):
     attributes: List[AttributeDTO] = Field(default_factory=list)
+
+
+BulkProductAction = Literal["status", "delete", "category", "affiliate"]
+
+
+class AdminBulkProductsBody(BaseModel):
+    ids: List[int]
+    action: BulkProductAction
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AdminVariantPatchBody(BaseModel):
+    price: Optional[float] = None
+    cost_price: Optional[float] = None
+    stock: Optional[int] = None
+    status: Optional[ProductStatus] = None
+
+
+class AdminProductQuickPatchBody(BaseModel):
+    price: Optional[float] = None
+    cost_price: Optional[float] = None
+    stock: Optional[int] = None
+    status: Optional[ProductStatus] = None
+    featured: Optional[bool] = None
+    category_id: Optional[int] = None
+    affiliate: Optional[int] = None

@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import itertools
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import Select, delete, func, select, update
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import Select, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.application.dto.admin_product import (
+    AdminBulkProductsBody,
     AdminProductCreateBody,
+    AdminProductQuickPatchBody,
     AdminProductUpdateBody,
+    AdminVariantPatchBody,
     BulkUpdateVariantsBody,
     GenerateVariantsBody,
 )
 from app.core.deps import get_current_user, get_db
+from app.domain.models.category import Category
 from app.domain.models.product import (
     Product,
     ProductAttribute,
@@ -30,6 +34,219 @@ from app.core.admin_api_error import AdminAPIError
 
 
 router = APIRouter()
+
+
+def _parse_bool(raw: Optional[str]) -> Optional[bool]:
+    if raw is None:
+        return None
+    s = str(raw).strip().lower()
+    if s in ("1", "true", "yes", "y", "on"):
+        return True
+    if s in ("0", "false", "no", "n", "off"):
+        return False
+    return None
+
+
+def _status_to_is_active(status_str: Optional[str]) -> Optional[bool]:
+    if status_str is None:
+        return None
+    return status_str == "active"
+
+
+async def _refresh_product_aggregates(db: AsyncSession, product_id: int) -> None:
+    variants = (await db.execute(select(ProductVariant).where(ProductVariant.product_id == product_id))).scalars().all()
+    product = await db.get(Product, product_id)
+    if not product:
+        return
+
+    if variants:
+        prices = [v.price for v in variants if v.price is not None]
+        if prices:
+            product.price = float(min(prices))
+        product.stock = int(sum([v.stock or 0 for v in variants]))
+        product.sku = variants[0].sku
+    product.updated_at = datetime.utcnow()
+
+
+def _stock_status(stock_total: int) -> str:
+    if stock_total <= 0:
+        return "out"
+    if stock_total < 10:
+        return "low"
+    return "in_stock"
+
+
+def _parse_sort(sort: Optional[str]) -> Tuple[str, str]:
+    # returns (field, direction)
+    s = (sort or "created_desc").strip().lower()
+    if "_" not in s:
+        return ("created", "desc")
+    field, direction = s.rsplit("_", 1)
+    if direction not in ("asc", "desc"):
+        return ("created", "desc")
+    return (field, direction)
+
+
+@router.get("")
+async def admin_list_products(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    search: Optional[str] = None,
+    status_q: Optional[str] = Query(None, alias="status"),
+    category_id: Optional[int] = None,
+    brand: Optional[str] = None,
+    has_variants: Optional[str] = None,
+    stock_status: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    has_affiliate: Optional[str] = None,
+    featured: Optional[str] = None,
+    sort: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Aggregate by variants
+    agg = (
+        select(
+            ProductVariant.product_id.label("product_id"),
+            func.count(ProductVariant.id).label("variant_count"),
+            func.min(ProductVariant.price).label("price_min"),
+            func.max(ProductVariant.price).label("price_max"),
+            func.sum(ProductVariant.stock).label("stock_total"),
+        )
+        .group_by(ProductVariant.product_id)
+        .subquery()
+    )
+
+    price_min_expr = func.coalesce(
+        case((Product.has_variants.is_(True), agg.c.price_min), else_=Product.price),
+        Product.price,
+    )
+    price_max_expr = func.coalesce(
+        case((Product.has_variants.is_(True), agg.c.price_max), else_=Product.price),
+        Product.price,
+    )
+    stock_total_expr = func.coalesce(
+        case((Product.has_variants.is_(True), agg.c.stock_total), else_=Product.stock),
+        Product.stock,
+        0,
+    )
+    variant_count_expr = func.coalesce(agg.c.variant_count, 0)
+
+    filters = [Product.deleted_at.is_(None)]
+
+    if search and search.strip() != "":
+        s = search.strip()
+        filters.append(
+            (Product.name.ilike(f"%{s}%"))
+            | (Product.sku.ilike(f"%{s}%"))
+            | (Product.slug.ilike(f"%{s}%"))
+        )
+
+    if status_q:
+        filters.append(Product.status == status_q)
+
+    if category_id is not None:
+        filters.append(Product.category_id == category_id)
+
+    if brand and brand.strip() != "":
+        filters.append(Product.brand == brand.strip())
+
+    hv = _parse_bool(has_variants)
+    if hv is not None:
+        filters.append(Product.has_variants.is_(hv))
+
+    ha = _parse_bool(has_affiliate)
+    if ha is not None:
+        if ha:
+            filters.append(Product.affiliate.is_not(None))
+        else:
+            filters.append(Product.affiliate.is_(None))
+
+    ft = _parse_bool(featured)
+    if ft is not None:
+        filters.append(Product.featured.is_(ft))
+
+    if min_price is not None:
+        filters.append(price_min_expr >= float(min_price))
+    if max_price is not None:
+        filters.append(price_min_expr <= float(max_price))
+
+    if stock_status in ("in_stock", "low", "out"):
+        if stock_status == "out":
+            filters.append(stock_total_expr <= 0)
+        elif stock_status == "low":
+            filters.append((stock_total_expr > 0) & (stock_total_expr < 10))
+        elif stock_status == "in_stock":
+            filters.append(stock_total_expr >= 10)
+
+    field, direction = _parse_sort(sort)
+    sort_col = {
+        "created": Product.created_at,
+        "updated": Product.updated_at,
+        "price": price_min_expr,
+        "stock": stock_total_expr,
+        "name": Product.name,
+    }.get(field, Product.created_at)
+    order_by = sort_col.asc() if direction == "asc" else sort_col.desc()
+
+    base_stmt = (
+        select(
+            Product,
+            Category,
+            price_min_expr.label("price_min"),
+            price_max_expr.label("price_max"),
+            stock_total_expr.label("stock_total"),
+            variant_count_expr.label("variant_count"),
+        )
+        .outerjoin(agg, agg.c.product_id == Product.id)
+        .outerjoin(Category, Category.id == Product.category_id)
+        .where(*filters)
+    )
+
+    count_stmt = (
+        select(func.count(Product.id))
+        .select_from(Product)
+        .outerjoin(agg, agg.c.product_id == Product.id)
+        .where(*filters)
+    )
+
+    total = int((await db.execute(count_stmt)).scalar_one())
+    offset = (page - 1) * limit
+
+    rows = (
+        await db.execute(
+            base_stmt.order_by(order_by).offset(offset).limit(limit)
+        )
+    ).all()
+
+    data: List[Dict[str, Any]] = []
+    for product, category, price_min, price_max, stock_total, variant_count in rows:
+        stock_total_i = int(stock_total or 0)
+        item = {
+            "id": product.id,
+            "name": product.name,
+            "sku": product.sku,
+            "slug": product.slug,
+            "thumbnail": product.thumbnail,
+            "price_min": float(price_min or product.price or 0),
+            "price_max": float(price_max or product.price or 0),
+            "stock_total": stock_total_i,
+            "stock_status": _stock_status(stock_total_i),
+            "variant_count": int(variant_count or 0),
+            "status": product.status,
+            "category_id": product.category_id,
+            "category": None if not category else {"id": category.id, "name": category.name},
+            "brand": product.brand,
+            "affiliate": product.affiliate,
+            "featured": bool(product.featured),
+            "has_variants": bool(product.has_variants),
+            "created_at": product.created_at,
+            "updated_at": product.updated_at,
+        }
+        data.append(item)
+
+    return {"data": data, "pagination": {"page": page, "limit": limit, "total": total}}
 
 
 def _admin_error(
@@ -81,6 +298,140 @@ def _validate_create_payload(payload: AdminProductCreateBody) -> None:
         seen.add(v.sku)
         if v.price is None or v.price <= 0:
             _admin_error(error_code="PRICE_INVALID", message="variant.price must be > 0")
+
+
+@router.patch("/bulk")
+async def admin_bulk_products(
+    payload: AdminBulkProductsBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not payload.ids:
+        _admin_error(error_code="IDS_REQUIRED", message="ids is required")
+    if len(payload.ids) > 500:
+        _admin_error(error_code="TOO_MANY_IDS", message="Max 500 product IDs per request")
+
+    updated = 0
+    failed: List[Dict[str, Any]] = []
+
+    async with db.begin():
+        products = (
+            await db.execute(
+                select(Product).where(Product.id.in_(payload.ids))
+            )
+        ).scalars().all()
+
+        by_id = {p.id: p for p in products}
+        for product_id in payload.ids:
+            product = by_id.get(product_id)
+            if not product or product.deleted_at is not None:
+                failed.append({"id": product_id, "reason": "NOT_FOUND"})
+                continue
+
+            try:
+                if payload.action == "status":
+                    st = payload.data.get("status")
+                    if st not in ("active", "draft", "inactive", "discontinued"):
+                        raise ValueError("status")
+                    product.status = st
+                    is_active = _status_to_is_active(st)
+                    if is_active is not None:
+                        product.is_active = is_active
+                elif payload.action == "category":
+                    cid = payload.data.get("category_id")
+                    if cid is None:
+                        raise ValueError("category_id")
+                    product.category_id = int(cid)
+                elif payload.action == "affiliate":
+                    aff = payload.data.get("affiliate")
+                    # allow null to clear
+                    product.affiliate = None if aff in (None, "") else int(aff)
+                elif payload.action == "delete":
+                    product.deleted_at = datetime.utcnow()
+                    product.is_active = False
+                    product.status = "inactive"
+                else:
+                    raise ValueError("action")
+
+                product.updated_at = datetime.utcnow()
+                updated += 1
+            except Exception:
+                failed.append({"id": product_id, "reason": "INVALID_DATA"})
+
+    return {"success": True, "updated": updated, "failed": failed}
+
+
+@router.patch("/variants/{variant_id}")
+async def admin_patch_variant(
+    variant_id: int,
+    payload: AdminVariantPatchBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    variant = await db.get(ProductVariant, variant_id)
+    if not variant:
+        _admin_error(error_code="VARIANT_NOT_FOUND", message="Variant not found", status_code=404)
+
+    if payload.price is not None and payload.price <= 0:
+        _admin_error(error_code="PRICE_INVALID", message="price must be > 0")
+    if payload.cost_price is not None and payload.cost_price < 0:
+        _admin_error(error_code="COST_PRICE_INVALID", message="cost_price must be >= 0")
+    if payload.stock is not None and payload.stock < 0:
+        _admin_error(error_code="STOCK_INVALID", message="stock must be >= 0")
+
+    async with db.begin():
+        if payload.price is not None:
+            variant.price = float(payload.price)
+        if payload.cost_price is not None:
+            variant.cost_price = float(payload.cost_price)
+        if payload.stock is not None:
+            variant.stock = int(payload.stock)
+        if payload.status is not None:
+            variant.status = payload.status
+            variant.is_active = (payload.status == "active")
+
+        variant.updated_at = datetime.utcnow()
+        await _refresh_product_aggregates(db, variant.product_id)
+
+    return {"success": True}
+
+
+@router.patch("/{product_id}")
+async def admin_quick_patch_product(
+    product_id: int,
+    payload: AdminProductQuickPatchBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    product = await _get_product_or_404(db, product_id)
+
+    if payload.price is not None and payload.price <= 0:
+        _admin_error(error_code="PRICE_INVALID", message="price must be > 0")
+    if payload.cost_price is not None and payload.cost_price < 0:
+        _admin_error(error_code="COST_PRICE_INVALID", message="cost_price must be >= 0")
+    if payload.stock is not None and payload.stock < 0:
+        _admin_error(error_code="STOCK_INVALID", message="stock must be >= 0")
+
+    async with db.begin():
+        if payload.status is not None:
+            product.status = payload.status
+            product.is_active = (payload.status == "active")
+        if payload.featured is not None:
+            product.featured = bool(payload.featured)
+        if payload.category_id is not None:
+            product.category_id = int(payload.category_id)
+        if payload.affiliate is not None:
+            product.affiliate = payload.affiliate
+
+        # If product has variants, price/stock live on variants; still allow override compat fields.
+        if payload.price is not None:
+            product.price = float(payload.price)
+        if payload.stock is not None:
+            product.stock = int(payload.stock)
+
+        product.updated_at = datetime.utcnow()
+
+    return {"success": True}
 
 
 async def _get_product_or_404(db: AsyncSession, product_id: int) -> Product:
